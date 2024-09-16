@@ -19,12 +19,18 @@
   
   console.log("Slack App initialized successfully ");
   // console.log('Slack App users : ' , slackApp.client);
-  
-  // Google Drive Authentication
+  const googleCredentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+
   const auth = new google.auth.GoogleAuth({
-    keyFile: process.env.CONFIG,
-    scopes: ["https://www.googleapis.com/auth/drive"],
+    credentials: googleCredentials,
+    scopes: ['https://www.googleapis.com/auth/drive'],
   });
+
+//   // Google Drive Authentication
+//   const auth = new google.auth.GoogleAuth({
+//     keyFile: process.env.CONFIG,
+//     scopes: ["https://www.googleapis.com/auth/drive"],
+//   });
   
   const driveClient = google.drive({ version: "v3", auth });
   
