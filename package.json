@@ -13,9 +13,9 @@
       "dotenv": "^16.0.3"             
     },
     "engines": {
-      "node": ">=14.0.0"              
+      "node": "18.x"              
     },
-    "author": "Your Name",
+    "author": "Mathes K",
     "license": "ISC"
   }
   
