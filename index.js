@@ -262,10 +262,10 @@
       const clonedFile = await driveClient.files.copy({
         fileId: sheetTemplateId,
         resource: {
-          name: `${projectName} - QA Sheet`,
+          name: `${projectName} - ${deadline} - ${qaTask} QA Sheet`,
         },
       });
-      console.log(`Google Sheet cloned successfully: ${clonedFile.data.id}`);
+      console.log(`Google Sheet cloned successfully: ${clonedFile.data.id}. Sheet Name: ${projectName} - ${deadline} - ${qaTask} QA Sheet.csv`);
   
       // Update permissions for assignee and requestor
       await updateSheetPermissions(
