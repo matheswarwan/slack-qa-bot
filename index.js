@@ -6,6 +6,27 @@
   const express = require("express");
   const bodyParser = require("body-parser");
   
+  const templates = JSON.parse(process.env.GOOGLE_TEMPLATE_IDS);
+  console.log("Template IDs: ", templates);
+
+  // const templates = JSON.parse(
+  //   tstr.replace(/(\w+):/g, '"$1":').replace(/'/g, '"')
+  // );
+  
+  const capitalizeWords = (str) => {
+    return str.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+  };
+  
+  const qa_type_select_values = Object.keys(templates).map(key => ({
+    text: {
+      type: "plain_text",
+      text: capitalizeWords(key),  // Capitalize each word in the key
+    },
+    value: key,  // Use the original key as the value
+  }));
+  
+  console.log(qa_type_select_values);
+  
   // Initialize the ExpressReceiver for handling Slack events
   const receiver = new ExpressReceiver({
     signingSecret: process.env.SLACK_SIGNING_SECRET,
@@ -167,29 +188,7 @@
             element: {
               type: "static_select",
               action_id: "qa_type_select",
-              options: [
-                {
-                  text: {
-                    type: "plain_text",
-                    text: "Journey Builder",
-                  },
-                  value: "journey_builder",
-                },
-                {
-                  text: {
-                    type: "plain_text",
-                    text: "Email",
-                  },
-                  value: "email",
-                },
-                {
-                  text: {
-                    type: "plain_text",
-                    text: "Landing Page",
-                  },
-                  value: "landing_page",
-                },
-              ],
+              options: qa_type_select_values
             },
           },
           {
@@ -332,12 +331,6 @@
   
   // Helper function to get the Google Sheet template ID based on QA type
   function getSheetTemplateId(qaType) {
-    const templates = {
-      email: "1O5FUuL2gq673kiuqclJwn4ZqbU4ggM5XEcy-1hMrPXc",
-      landing_page: "1O5FUuL2gq673kiuqclJwn4ZqbU4ggM5XEcy-1hMrPXc",
-      journey_builder: "1O5FUuL2gq673kiuqclJwn4ZqbU4ggM5XEcy-1hMrPXc",
-      custom: "1O5FUuL2gq673kiuqclJwn4ZqbU4ggM5XEcy-1hMrPXc",
-    };
     return templates[qaType];
   }
   
