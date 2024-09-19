@@ -264,6 +264,7 @@
         resource: {
           name: `${projectName} - ${deadline} - ${qaTask} QA Sheet`,
         },
+        supportsAllDrives: true, 
       });
       console.log(`Google Sheet cloned successfully: ${clonedFile.data.id}. Sheet Name: ${projectName} - ${deadline} - ${qaTask} QA Sheet.csv`);
   
