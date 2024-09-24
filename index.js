@@ -346,7 +346,7 @@
   });
 
   // Helper function to check if deadline date is in past 
-  app.action('deadline_select', async ({ ack, body, client }) => {
+  slackApp.action('deadline_select', async ({ ack, body, client }) => {
     await ack();
   
     const selectedDate = body.actions[0].selected_date;
