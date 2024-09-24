@@ -270,11 +270,11 @@
       const clonedFile = await driveClient.files.copy({
         fileId: sheetTemplateId,
         resource: {
-          name: `${projectName} - ${deadline} - ${qaTask} QA Sheet`,
+          name: `${deadline} - ${projectName} - ${properCase(qaTask)} QA`,
         },
         supportsAllDrives: true, 
       });
-      console.log(`Google Sheet cloned successfully: ${clonedFile.data.id}. Sheet Name: ${projectName} - ${deadline} - ${qaTask} QA Sheet.csv`);
+      console.log(`Google Sheet cloned successfully: ${clonedFile.data.id}. Sheet Name: ${deadline} - ${projectName} - ${properCase(qaTask)} QA`);
   
       // Update permissions for assignee and requestor
       await updateSheetPermissions(
@@ -297,20 +297,13 @@
       // Send message to channel in the specified format
       await client.chat.postMessage({
         channel: channelId,
-        text: `Hi <@${assigneeUserId}>, Here's the ${properCase(qaTask)} QA document created for *${projectName}*, due on *${deadline}*. _Notes: ${notes}_`,  
+        text: `Hi <@${assigneeUserId}>, Here's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}*. _Notes: ${notes}_`,  
         blocks: [
           {
             "type": "section",
             "text": {
               "type": "mrkdwn",
-              "text": `:wave: Hi <@${assigneeUserId}>,\n\nHere's the ${properCase(qaTask)} QA document created for *${projectName}*, due on *${deadline}*.`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `*Notes*:\n${notes}`
+              "text": `:wave: Hi <@${assigneeUserId}>,\n\nHere's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}*.`
             }
           },
           {
@@ -320,16 +313,9 @@
             "type": "section",
             "text": {
               "type": "mrkdwn",
-              "text": `:page_with_curl: *Filename in Google Drive*`
+              "text": `*Notes*:\n${notes}`
             }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `<${sheetLink}|${sheetLink}>`
-            }
-          },
+          }
         ]
       });
       
@@ -346,23 +332,23 @@
   });
 
   // Helper function to check if deadline date is in past 
-  slackApp.action('deadline_select', async ({ ack, body, client }) => {
-    await ack();
+  // slackApp.action('deadline_select', async ({ ack, body, client }) => {
+  //   await ack();
   
-    const selectedDate = body.actions[0].selected_date;
-    const today = new Date().toISOString().split('T')[0];
+  //   const selectedDate = body.actions[0].selected_date;
+  //   const today = new Date().toISOString().split('T')[0];
   
-    if (selectedDate < today) {
-      await client.chat.postEphemeral({
-        channel: body.channel.id,
-        user: body.user.id,
-        text: "Please select a current or future date.",
-      });
-    } else {
-      // Proceed with handling the selected date
-      console.log('Task due date is in future')
-    }
-  });
+  //   if (selectedDate < today) {
+  //     await client.chat.postEphemeral({
+  //       channel: body.channel.id,
+  //       user: body.user.id,
+  //       text: "Please select a current or future date.",
+  //     });
+  //   } else {
+  //     // Proceed with handling the selected date
+  //     console.log('Task due date is in future')
+  //   }
+  // });
   
 
   // Helper function to change text to proper case 
