@@ -157,7 +157,7 @@
               action_id: "assignee_select",
               placeholder: {
                 type: "plain_text",
-                text: "Assign to a user",
+                text: "Select a team member",
               },
               options: userList, // Dynamic user list
             },
@@ -174,7 +174,7 @@
               action_id: "project_input",
               placeholder: {
                 type: "plain_text",
-                text: "Add project name here",
+                text: "Enter the project name",
               },
             },
           },
@@ -183,11 +183,15 @@
             block_id: "qa_type",
             label: {
               type: "plain_text",
-              text: "QA Task",
+              text: "Type",
             },
             element: {
               type: "static_select",
               action_id: "qa_type_select",
+              placeholder: {
+                type: "plain_text",
+                text: "Choose a QA task type",
+              },
               options: qa_type_select_values
             },
           },
@@ -201,7 +205,11 @@
             element: {
               type: "datepicker",
               action_id: "deadline_select",
-              initial_date: "2024-10-02",
+              placeholder: {
+                type: "plain_text",
+                text: "Set the due date",
+              },
+              initial_date: new Date().toISOString().split('T')[0] // Get today's date in YYYY-MM-DD format
             },
           },
           {
@@ -217,7 +225,7 @@
               multiline: true,
               placeholder: {
                 type: "plain_text",
-                text: "Add task details here",
+                text: "Provide additional task details",
               },
             },
           },
@@ -289,20 +297,13 @@
       // Send message to channel in the specified format
       await client.chat.postMessage({
         channel: channelId,
-        text: `Hi <@${assigneeUserId}>, Here's the QA document created for *${projectName}* - *${qaTask}*, due on *${deadline}*. _Notes: ${notes}_`,  
+        text: `Hi <@${assigneeUserId}>, Here's the ${properCase(qaTask)} QA document created for *${projectName}*, due on *${deadline}*. _Notes: ${notes}_`,  
         blocks: [
           {
             "type": "section",
             "text": {
               "type": "mrkdwn",
-              "text": `:wave: Hi <@${assigneeUserId}>,\n\nHere's the QA document created for *${projectName}* - *${qaTask}*, due on *${deadline}*.`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `:page_with_curl: *Google Sheet*: <${sheetLink}|Click here>`
+              "text": `:wave: Hi <@${assigneeUserId}>,\n\nHere's the ${properCase(qaTask)} QA document created for *${projectName}*, due on *${deadline}*.`
             }
           },
           {
@@ -314,7 +315,21 @@
           },
           {
             "type": "divider"
-          }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `:page_with_curl: *Filename in Google Drive*`
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": `<${sheetLink}|${sheetLink}>`
+            }
+          },
         ]
       });
       
@@ -329,6 +344,39 @@
       console.error("Error processing modal submission:", error);
     }
   });
+
+  // Helper function to check if deadline date is in past 
+  app.action('deadline_select', async ({ ack, body, client }) => {
+    await ack();
+  
+    const selectedDate = body.actions[0].selected_date;
+    const today = new Date().toISOString().split('T')[0];
+  
+    if (selectedDate < today) {
+      await client.chat.postEphemeral({
+        channel: body.channel.id,
+        user: body.user.id,
+        text: "Please select a current or future date.",
+      });
+    } else {
+      // Proceed with handling the selected date
+      console.log('Task due date is in future')
+    }
+  });
+  
+
+  // Helper function to change text to proper case 
+  function properCase(str) {
+    // Replace underscores with spaces
+    str = str.replace(/_/g, ' ');
+
+    // Convert to Proper Case (Title Case)
+    str = str.split(' ').map(word => 
+        word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    ).join(' ');
+
+    return str;
+  }
   
   // Helper function to get the Google Sheet template ID based on QA type
   function getSheetTemplateId(qaType) {
