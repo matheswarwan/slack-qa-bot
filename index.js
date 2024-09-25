@@ -271,6 +271,7 @@
         fileId: sheetTemplateId,
         resource: {
           name: `${deadline} - ${projectName} - ${properCase(qaTask)} QA`,
+          parents: process.env.COPY_INTO_FOLDER_ID
         },
         supportsAllDrives: true, 
       });
