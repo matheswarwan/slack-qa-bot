@@ -384,8 +384,9 @@
           resource: {
             type: "user",
             role: "writer",
-            emailAddress: assigneeEmail, // Ensure this is a valid email
+            emailAddress: assigneeEmail, 
           },
+          supportsAllDrives: true
         });
         console.log(`Permissions granted to assignee: ${assigneeEmail}`);
       } else {
@@ -399,8 +400,9 @@
           resource: {
             type: "user",
             role: "writer",
-            emailAddress: requestorEmail, // Ensure this is a valid email
+            emailAddress: requestorEmail, 
           },
+          supportsAllDrives: true
         });
         console.log(`Permissions granted to requestor: ${requestorEmail}`);
       } else {
