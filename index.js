@@ -271,7 +271,7 @@
         fileId: sheetTemplateId,
         resource: {
           name: `${deadline} - ${projectName} - ${properCase(qaTask)} QA`,
-          parents: process.env.COPY_INTO_FOLDER_ID // Folder where the cloned file to be placed into
+          parents: [process.env.COPY_INTO_FOLDER_ID] // Folder where the cloned file to be placed into. Must be an array
         },
         supportsAllDrives: true, 
       });
