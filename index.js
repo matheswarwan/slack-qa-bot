@@ -275,7 +275,7 @@
         },
         supportsAllDrives: true, 
       });
-      console.log(`Google Sheet cloned successfully: ${clonedFile.data.id}. Sheet Name: ${deadline} - ${projectName} - ${properCase(qaTask)} QA`);
+      console.log(`Google Sheet cloned successfully: ${clonedFile.data.id} into folder ${process.env.COPY_INTO_FOLDER_ID}. Sheet Name: ${deadline} - ${projectName} - ${properCase(qaTask)} QA`);
   
       // Update permissions for assignee and requestor
       await updateSheetPermissions(
