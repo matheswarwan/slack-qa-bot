@@ -215,6 +215,7 @@
           {
             type: "input",
             block_id: "notes",
+            optional: true, // optional
             label: {
               type: "plain_text",
               text: "Notes",
