@@ -1,9 +1,9 @@
 console.log(process.env.CONFIG);
 
-const { App, ExpressReceiver } = require("@slack/bolt");
-const { google } = require("googleapis");
-const express = require("express");
-const bodyParser = require("body-parser");
+let { App, ExpressReceiver } = require("@slack/bolt");
+let { google } = require("googleapis");
+let express = require("express");
+let bodyParser = require("body-parser");
 
 let assigneeUserId = "";
 let projectName = "";
@@ -20,15 +20,15 @@ let sheetLink = "";
 let templates = JSON.parse(process.env.GOOGLE_TEMPLATE_IDS);
 console.log("Template IDs: ", templates);
 
-// const templates = JSON.parse(
+// let templates = JSON.parse(
 //   tstr.replace(/(\w+):/g, '"$1":').replace(/'/g, '"')
 // );
 
-const capitalizeWords = (str) => {
+let capitalizeWords = (str) => {
     return str.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
 };
 
-const qa_type_select_values = Object.keys(templates).map(key => ({
+let qa_type_select_values = Object.keys(templates).map(key => ({
     text: {
         type: "plain_text",
         text: capitalizeWords(key),  // Capitalize each word in the key
@@ -39,39 +39,39 @@ const qa_type_select_values = Object.keys(templates).map(key => ({
 console.log(qa_type_select_values);
 
 // Initialize the ExpressReceiver for handling Slack events
-const receiver = new ExpressReceiver({
+let receiver = new ExpressReceiver({
     signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
 // Initialize your Bolt App with the ExpressReceiver
-const slackApp = new App({
+let slackApp = new App({
     token: process.env.SLACK_BOT_TOKEN,
     receiver: receiver,
 });
 
 console.log("Slack App initialized successfully ");
 // console.log('Slack App users : ' , slackApp.client);
-const googleCredentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+let googleCredentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
-const auth = new google.auth.GoogleAuth({
+let auth = new google.auth.GoogleAuth({
     credentials: googleCredentials,
     scopes: ['https://www.googleapis.com/auth/drive'],
 });
 
 //   // Google Drive Authentication
-//   const auth = new google.auth.GoogleAuth({
+//   let auth = new google.auth.GoogleAuth({
 //     keyFile: process.env.CONFIG,
 //     scopes: ["https://www.googleapis.com/auth/drive"],
 //   });
 
-const driveClient = google.drive({ version: "v3", auth });
+let driveClient = google.drive({ version: "v3", auth });
 
 console.log("Google Drive authenticated successfully");
 
 // Helper function to get the email of the Slack user
 async function getUserEmail(client, userId) {
     try {
-        const userInfo = await client.users.profile.get({ user: userId });
+        let userInfo = await client.users.profile.get({ user: userId });
         if (userInfo.profile.email) {
             console.log(`User email found: ${userInfo.profile.email}`);
             return userInfo.profile.email;
@@ -105,7 +105,7 @@ async function ensureBotInChannel(client, channelId) {
 // Function to get Slack user ID from email with error handling
 async function getUserIdByEmail(client, email) {
     try {
-        const user = await client.users.lookupByEmail({ email });
+        let user = await client.users.lookupByEmail({ email });
         if (user && user.user && user.user.id) {
             console.log(`Found Slack user ID for email ${email}: ${user.user.id}`);
             return user.user.id; // Return Slack user ID if found
@@ -126,157 +126,179 @@ slackApp.command("/qa", async ({ ack, body, client }) => {
         `Received /qa command from user: ${body.user_id} in channel: ${body.channel_id}`
     );
 
-    // Fetch user list dynamically inside the async function
-    const users = await client.conversations.members({
-        channel: body.channel_id,
-    });
+    let requestorId = body.user_id; // Save the original requestor ID here
+    console.log('Original /qa requestor id ' , requestorId);
+    try {
+        // Fetch user list dynamically inside the async function
+        let users = await client.conversations.members({
+            channel: body.channel_id,
+        });
+        
+        let userList = await Promise.all(
+            users.members.map(async (userId) => {
+                let userInfo = await client.users.info({ user: userId });
+                return {
+                    text: {
+                        type: "plain_text",
+                        text: userInfo.user.real_name || userInfo.user.name,
+                    },
+                    value: userId, // Store the Slack user ID
+                };
+            })
+        );
+        
 
-    const userList = await Promise.all(
-        users.members.map(async (userId) => {
-            const userInfo = await client.users.info({ user: userId });
-            return {
-                text: {
+        // Open the modal for user to submit QA form
+        // Open the modal for user to submit QA form
+        await client.views.open({
+            trigger_id: body.trigger_id,
+            view: {
+                type: "modal",
+                callback_id: "qa_form_submission",
+                private_metadata: JSON.stringify(
+                    { 
+                        channel_id: body.channel_id, 
+                        requestor_id: requestorId 
+                    }),
+                title: {
                     type: "plain_text",
-                    text: userInfo.user.real_name || userInfo.user.name,
+                    text: "QA Submission",
                 },
-                value: userId, // Store the Slack user ID
-            };
-        })
-    );
-
-
-    // Open the modal for user to submit QA form
-    // Open the modal for user to submit QA form
-    await client.views.open({
-        trigger_id: body.trigger_id,
-        view: {
-            type: "modal",
-            callback_id: "qa_form_submission",
-            private_metadata: JSON.stringify({ channel_id: body.channel_id }),
-            title: {
-                type: "plain_text",
-                text: "QA Submission",
+                blocks: [
+                    {
+                        type: "input",
+                        block_id: "assignee",
+                        label: {
+                            type: "plain_text",
+                            text: "Assignee",
+                        },
+                        element: {
+                            type: "static_select",
+                            action_id: "assignee_select",
+                            placeholder: {
+                                type: "plain_text",
+                                text: "Select a team member",
+                            },
+                            options: userList, // Use the dynamically fetched user list here
+                        },
+                    },
+                    {
+                        type: "input",
+                        block_id: "project_name",
+                        label: {
+                            type: "plain_text",
+                            text: "Project Name",
+                        },
+                        element: {
+                            type: "plain_text_input",
+                            action_id: "project_input",
+                            placeholder: {
+                                type: "plain_text",
+                                text: "Enter the project name",
+                            },
+                        },
+                    },
+                    {
+                        type: "input",
+                        block_id: "qa_type",
+                        label: {
+                            type: "plain_text",
+                            text: "Type",
+                        },
+                        element: {
+                            type: "static_select",
+                            action_id: "qa_type_select",
+                            placeholder: {
+                                type: "plain_text",
+                                text: "Choose a QA task type",
+                            },
+                            options: qa_type_select_values,
+                        },
+                    },
+                    {
+                        type: "input",
+                        block_id: "deadline",
+                        label: {
+                            type: "plain_text",
+                            text: "Due Date",
+                        },
+                        element: {
+                            type: "datepicker",
+                            action_id: "deadline_select",
+                            placeholder: {
+                                type: "plain_text",
+                                text: "Select a due date",
+                            },
+                            initial_date: new Date().toISOString().split("T")[0],
+                        },
+                    },
+                    {
+                        type: "input",
+                        block_id: "time",
+                        label: {
+                            type: "plain_text",
+                            text: "Time",
+                        },
+                        element: {
+                            type: "timepicker", // Adding timepicker here
+                            action_id: "timepicker",
+                            placeholder: {
+                                type: "plain_text",
+                                text: "Select a time",
+                            },
+                        },
+                    },
+                    {
+                        type: "input",
+                        block_id: "notes",
+                        optional: true,
+                        label: {
+                            type: "plain_text",
+                            text: "Notes",
+                        },
+                        element: {
+                            type: "plain_text_input",
+                            action_id: "notes_input",
+                            multiline: true,
+                            placeholder: {
+                                type: "plain_text",
+                                text: "Provide additional task details",
+                            },
+                        },
+                    },
+                ],
+                submit: {
+                    type: "plain_text",
+                    text: "Submit",
+                },
             },
-            blocks: [
-                {
-                    type: "input",
-                    block_id: "assignee",
-                    label: {
-                        type: "plain_text",
-                        text: "Assignee",
-                    },
-                    element: {
-                        type: "static_select",
-                        action_id: "assignee_select",
-                        placeholder: {
-                            type: "plain_text",
-                            text: "Select a team member",
-                        },
-                        options: userList, // Use the dynamically fetched user list here
-                    },
-                },
-                {
-                    type: "input",
-                    block_id: "project_name",
-                    label: {
-                        type: "plain_text",
-                        text: "Project Name",
-                    },
-                    element: {
-                        type: "plain_text_input",
-                        action_id: "project_input",
-                        placeholder: {
-                            type: "plain_text",
-                            text: "Enter the project name",
-                        },
-                    },
-                },
-                {
-                    type: "input",
-                    block_id: "qa_type",
-                    label: {
-                        type: "plain_text",
-                        text: "Type",
-                    },
-                    element: {
-                        type: "static_select",
-                        action_id: "qa_type_select",
-                        placeholder: {
-                            type: "plain_text",
-                            text: "Choose a QA task type",
-                        },
-                        options: qa_type_select_values,
-                    },
-                },
-                {
-                    type: "input",
-                    block_id: "deadline",
-                    label: {
-                        type: "plain_text",
-                        text: "Deadline Date",
-                    },
-                    element: {
-                        type: "datepicker",
-                        action_id: "deadline_select",
-                        placeholder: {
-                            type: "plain_text",
-                            text: "Select a due date",
-                        },
-                        initial_date: new Date().toISOString().split("T")[0],
-                    },
-                },
-                {
-                    type: "input",
-                    block_id: "time",
-                    label: {
-                        type: "plain_text",
-                        text: "Deadline Time",
-                    },
-                    element: {
-                        type: "timepicker", // Adding timepicker here
-                        action_id: "timepicker",
-                        placeholder: {
-                            type: "plain_text",
-                            text: "Select a time",
-                        },
-                    },
-                },
-                {
-                    type: "input",
-                    block_id: "notes",
-                    optional: true,
-                    label: {
-                        type: "plain_text",
-                        text: "Notes",
-                    },
-                    element: {
-                        type: "plain_text_input",
-                        action_id: "notes_input",
-                        multiline: true,
-                        placeholder: {
-                            type: "plain_text",
-                            text: "Provide additional task details",
-                        },
-                    },
-                },
-            ],
-            submit: {
-                type: "plain_text",
-                text: "Submit",
-            },
-        },
-    });
+        });
 
 
-    console.log("Modal opened successfully");
+        console.log("Modal opened successfully");
+
+        users = await client.conversations.members({
+            channel: body.channel_id,
+        });
+
+    } catch (error) {
+        console.error("Error opening modal or processing request:", error);
+    }
 });
-
 
 slackApp.view("qa_form_submission", async ({ ack, body, view, client }) => {
     await ack();
     console.log("Acknowledged form submission.");
 
     try {
+        let parsedMetadata = JSON.parse(view.private_metadata || '{}');
+        let channelId = parsedMetadata.channel_id || 'default-channel-id'; 
+        let requestorId = parsedMetadata.requestor_id; 
+
+        if (!requestorId) {
+            throw new Error("Requestor ID is missing from metadata");
+        }
+
         assigneeUserId = view.state.values.assignee.assignee_select.selected_option.value;
         projectName = view.state.values.project_name.project_input.value;
         qaTask = view.state.values.qa_type.qa_type_select.selected_option.value;
@@ -287,28 +309,16 @@ slackApp.view("qa_form_submission", async ({ ack, body, view, client }) => {
         requestorEmail = await getUserEmail(client, body.user.id);
         assigneeEmail = await getUserEmail(client, assigneeUserId);
 
+        console.log("Requestor ID:", requestorId);
         console.log("Assignee Email:", assigneeEmail);
         console.log("Requestor Email:", requestorEmail);
         console.log("QA Task:", qaTask);
         console.log("Deadline:", deadline);
         console.log("Notes:", notes);
-
-
-        console.log("Private Metadata before parsing:", view.private_metadata);
-        let parsedMetadata;
-        try {
-            parsedMetadata = JSON.parse(view.private_metadata || '{}');
-        } catch (error) {
-            console.error('Error parsing JSON:', error);
-            return; // Exit or handle this case based on your needs
-        }
-
-        const channelId = parsedMetadata.channel_id || 'default-channel-id'; // Use fallback if needed
         console.log("Channel ID:", channelId);
 
-
         // Clone Google Sheet and update permissions
-        const sheetTemplateId = getSheetTemplateId(qaTask);
+        let sheetTemplateId = getSheetTemplateId(qaTask);
 
         // Helper function to handle retries with exponential backoff
         async function withRetry(apiCall, retries = 5, backoff = 1000) {
@@ -327,6 +337,8 @@ slackApp.view("qa_form_submission", async ({ ack, body, view, client }) => {
             }
             throw new Error('Max retries reached');
         }
+
+        let clonedFile;
         try {
             clonedFile = await withRetry(() => driveClient.files.copy({
                 fileId: sheetTemplateId,
@@ -341,15 +353,16 @@ slackApp.view("qa_form_submission", async ({ ack, body, view, client }) => {
         } catch (error) {
             console.error('Error while copying file or setting permissions:', error);
         }
+
         sheetLink = `https://docs.google.com/spreadsheets/d/${clonedFile.data.id}`;
-        const metadata = JSON.parse(view.private_metadata);
-        // const channelId = metadata.channel_id;
+
+        // Ensure the bot is in the channel
         await ensureBotInChannel(client, channelId);
 
-        // Send message with accept and reject buttons
-        await client.chat.postMessage({
+        // 1. Post the message to the entire group
+        let response = await client.chat.postMessage({
             channel: channelId,
-            text: `👋 Hi <@${assigneeUserId}>, Here's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}* by *${body.user.name}*.`,
+            text: `👋 Hi <@${assigneeUserId}>,\nHere's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}* by *${body.user.name}*.`,
             blocks: [
                 {
                     "type": "section",
@@ -357,9 +370,21 @@ slackApp.view("qa_form_submission", async ({ ack, body, view, client }) => {
                         "type": "mrkdwn",
                         "text": `👋 Hi <@${assigneeUserId}>,\nHere's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}* by *${body.user.name}*.\n*Notes*: ${notes}`
                     }
-                },
+                }
+            ]
+        });
+        console.log("Message posted, ts:", response.ts); // Log the ts here
+        
+
+        // 2. Send an ephemeral message to the assignee with Accept/Reject buttons
+        await client.chat.postEphemeral({
+            channel: channelId,
+            user: assigneeUserId, // Send only to the assignee
+            text: `👋 Hi <@${assigneeUserId}>, please review the QA task.`,
+            blocks: [
                 {
                     "type": "actions",
+                    "block_id": `requestor_${requestorId}`,  // Embed the requestor ID in the block ID
                     "elements": [
                         {
                             "type": "button",
@@ -384,48 +409,57 @@ slackApp.view("qa_form_submission", async ({ ack, body, view, client }) => {
             ]
         });
 
-        console.log(`Message with buttons posted in channel: ${channelId}`);
+        console.log(`Message posted to group and ephemeral buttons sent to assignee.`);
     } catch (error) {
         console.error("Error processing modal submission:", error);
     }
 });
-
 
 slackApp.view("reassign_task_modal_submission", async ({ ack, body, view, client }) => {
     await ack();
     console.log("Reassign modal submission acknowledged.");
 
     try {
-        // Ensure that these block IDs and action IDs match the blocks in the modal
+        // Retrieve metadata
+        const parsedMetadata = JSON.parse(view.private_metadata || '{}');
+        const requestorId = parsedMetadata.requestor_id;
+        const channelId = parsedMetadata.channel_id;
+
+        if (!channelId || !requestorId) {
+            throw new Error("Channel ID or requestor ID is missing from private metadata.");
+        }
+
+        // Extract updated form values from modal submission
         assigneeUserId = view.state.values.new_assignee.assignee_select.selected_option.value;
         deadlineDate = view.state.values.new_deadline.deadline_select.selected_date;
         deadlineTime = view.state.values.time.timepicker.selected_time;
         notes = view.state.values.new_notes.notes_input.value || "No notes provided";
         deadline = `${deadlineDate} ${deadlineTime}`;
 
-
-        // Retrieve the channel_id from private_metadata
-        const privateMetadata = JSON.parse(view.private_metadata);
-        const channelId = privateMetadata.channel_id;
-
-        if (!channelId) {
-            throw new Error("Channel ID is missing from private metadata.");
-        }
-
-        // Post the original message with updated values
+        // 1. Post the updated message to the channel without buttons
         await client.chat.postMessage({
-            channel: channelId,  // Use channel_id from private_metadata
-            text: `👋 Hi <@${assigneeUserId}>, Here's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}* by *${body.user.name}*.`,
+            channel: channelId,
+            text: `👋 Hi <@${assigneeUserId}>, here's the updated task for *${projectName}*, due on *${deadline}*.`,
             blocks: [
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": `👋 Hi <@${assigneeUserId}>,\nHere's the <${sheetLink}|${properCase(qaTask)} QA document> created for *${projectName}*, due on *${deadline}* by *${body.user.name}*.\n*Notes*: ${notes}`
+                        "text": `👋 Hi <@${assigneeUserId}>,\nHere's the updated task for *${projectName}*, due on *${deadline}*.\n*Notes*: ${notes}`
                     }
-                },
+                }
+            ]
+        });
+
+        // 2. Send an ephemeral message with Accept/Reject buttons to the new assignee
+        await client.chat.postEphemeral({
+            channel: channelId,
+            user: assigneeUserId,  // Only visible to the new assignee
+            text: `👋 Hi <@${assigneeUserId}>, please review the updated QA task.`,
+            blocks: [
                 {
                     "type": "actions",
+                    "block_id": `requestor_${requestorId}`,  // Use the requestor ID in block_id
                     "elements": [
                         {
                             "type": "button",
@@ -450,30 +484,47 @@ slackApp.view("reassign_task_modal_submission", async ({ ack, body, view, client
             ]
         });
 
-        console.log("Reassignment successful and original message posted.");
+        console.log("Reassignment successful, message posted, and buttons sent to the assignee.");
     } catch (error) {
         console.error("Error processing reassign modal submission:", error);
     }
 });
 
 
-// Handle "Accept" button click
 slackApp.action("accept_task", async ({ ack, body, client }) => {
     await ack();
 
     const requestorId = body.user.id;
 
-    // Update the message to remove buttons but keep the original content
+    // Use chat.postMessage to post the message to the public channel
+    if (!body.message || !body.message.ts) {
+        await client.chat.postMessage({
+            channel: body.channel.id,  // Post the message to the same channel
+            text: `<@${requestorId}> has accepted ✅ the task.`,
+            blocks: [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": `<@${requestorId}> has accepted ✅ the task.`
+                    }
+                }
+            ]
+        });
+        return;
+    }
+
+    // Proceed if `ts` is present and update the original message
     await client.chat.update({
         channel: body.channel.id,
-        ts: body.message.ts, // Reference the original message timestamp
-        text: body.message.text, // Retain the original message text
+        ts: body.message.ts,
+        text: body.message.text,
         blocks: [
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": body.message.blocks[0].text.text // Retain original message
+                    "text": body.message.blocks[0].text.text
                 }
             },
             {
@@ -488,25 +539,24 @@ slackApp.action("accept_task", async ({ ack, body, client }) => {
 });
 
 
-// Handle "Reject" button click
+
 slackApp.action("reject_task", async ({ ack, body, client }) => {
     await ack();
 
     const requestorId = body.user.id;
+    const blockId = body.actions[0].block_id;
+    const originalRequestorId = blockId.split('_')[1];
 
-    // Update the message to remove buttons but keep the original content
-    await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts, // Reference the original message timestamp
-        text: body.message.text, // Retain the original message text
+    if (!originalRequestorId) {
+        console.error('Original requestor ID is missing in the metadata');
+        return;
+    }
+
+    // 1. Post the rejection message to the public channel
+    await client.chat.postMessage({
+        channel: body.channel.id,  // Post the message to the same channel
+        text: `<@${requestorId}> has rejected ❌ the task. Please reassign it.`,
         blocks: [
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": body.message.blocks[0].text.text // Retain original message
-                }
-            },
             {
                 "type": "section",
                 "text": {
@@ -517,21 +567,15 @@ slackApp.action("reject_task", async ({ ack, body, client }) => {
         ]
     });
 
-    // Send an ephemeral message to the requestor with the "Re-Assign" button
+    // 2. Send the "Re-Assign" button as an ephemeral message to the original requestor
     await client.chat.postEphemeral({
         channel: body.channel.id,
-        user: requestorId, // Only the requestor can see this message
-        text: `The QA task has been rejected by <@${requestorId}>. Would you like to reassign it to someone else?`,
+        user: originalRequestorId,  // Send only to the original requestor
+        text: `Please re-assign the task.`,
         blocks: [
             {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": `The QA task has been rejected by <@${requestorId}>. Would you like to reassign it to someone else?`
-                }
-            },
-            {
                 "type": "actions",
+                "block_id": `reassign_${originalRequestorId}`,  // Embed the original requestor ID in the block ID
                 "elements": [
                     {
                         "type": "button",
@@ -550,23 +594,25 @@ slackApp.action("reject_task", async ({ ack, body, client }) => {
 
 
 
-// Handle "Re-Assign" button click
 slackApp.action("reassign_task", async ({ ack, body, client }) => {
     await ack();
 
+    const blockId = body.actions[0].block_id;
+    const originalRequestorId = blockId.split('_')[1];  // Extract the original requestor ID from the block ID
+
     // Fetch previous values (stored earlier)
-    const previousNotes = notes;  // Retrieve the previous notes from the initial task submission
-    const previousDeadline = deadline;  // Retrieve the previous deadline
-    const previousAssigneeId = assigneeUserId;  // Previous assignee
+    let previousNotes = notes;  // Retrieve the previous notes from the initial task submission
+    let previousDeadline = deadline;  // Retrieve the previous deadline
+    let previousAssigneeId = assigneeUserId;  // Previous assignee
 
     // Fetch user list dynamically for the modal
-    const users = await client.conversations.members({
+    let users = await client.conversations.members({
         channel: body.channel.id,
     });
 
-    const userList = await Promise.all(
+    let userList = await Promise.all(
         users.members.map(async (userId) => {
-            const userInfo = await client.users.info({ user: userId });
+            let userInfo = await client.users.info({ user: userId });
             return {
                 text: {
                     type: "plain_text",
@@ -578,7 +624,7 @@ slackApp.action("reassign_task", async ({ ack, body, client }) => {
     );
 
     // Find the previous assignee's information from the userList
-    const previousAssignee = userList.find(user => user.value === previousAssigneeId);
+    let previousAssignee = userList.find(user => user.value === previousAssigneeId);
 
     // Open the modal for re-assigning the task with pre-filled values
     await client.views.open({
@@ -586,7 +632,10 @@ slackApp.action("reassign_task", async ({ ack, body, client }) => {
         view: {
             type: "modal",
             callback_id: "reassign_task_modal_submission",
-            private_metadata: JSON.stringify({ channel_id: body.channel.id }),  // Pass channel_id in metadata
+            private_metadata: JSON.stringify({
+                channel_id: body.channel.id,  // Pass the channel ID
+                requestor_id: originalRequestorId  // Pass the original requestor ID
+            }),
             title: {
                 type: "plain_text",
                 text: "Re-Assign Task",
@@ -617,7 +666,7 @@ slackApp.action("reassign_task", async ({ ack, body, client }) => {
                     block_id: "new_deadline",
                     label: {
                         type: "plain_text",
-                        text: "Deadline",
+                        text: "Due Date",
                     },
                     element: {
                         type: "datepicker",
@@ -630,7 +679,7 @@ slackApp.action("reassign_task", async ({ ack, body, client }) => {
                     block_id: "time",
                     label: {
                         type: "plain_text",
-                        text: "Deadline Time",
+                        text: "Time",
                     },
                     element: {
                         type: "timepicker", // Correct usage of timepicker
@@ -662,29 +711,7 @@ slackApp.action("reassign_task", async ({ ack, body, client }) => {
             },
         },
     });
-
-
 });
-
-
-// Helper function to check if deadline date is in past 
-// slackApp.action('deadline_select', async ({ ack, body, client }) => {
-//   await ack();
-
-//   const selectedDate = body.actions[0].selected_date;
-//   const today = new Date().toISOString().split('T')[0];
-
-//   if (selectedDate < today) {
-//     await client.chat.postEphemeral({
-//       channel: body.channel.id,
-//       user: body.user.id,
-//       text: "Please select a current or future date.",
-//     });
-//   } else {
-//     // Proceed with handling the selected date
-//     console.log('Task due date is in future')
-//   }
-// });
 
 
 // Helper function to change text to proper case 
@@ -762,7 +789,7 @@ receiver.app.use((req, res, next) => {
 });
 
 // Start the ExpressReceiver server (this will handle Slack events)
-const PORT = process.env.PORT || 3000;
+let PORT = process.env.PORT || 3000;
 receiver.app.listen(PORT, () => {
     console.log(`⚡️ Express and Slack app are running on port ${PORT}`);
 });
