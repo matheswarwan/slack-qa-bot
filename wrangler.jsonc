@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "slack-qa-bot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-03",
+  "workers_dev": true,
+  "kv_namespaces": [{ "binding": "TASK_STATE", "id": "5e6833ddf0d6480083e64c4a3699434b" }],
+  // Secrets (wrangler secret put): SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET,
+  // GOOGLE_SA_CLIENT_EMAIL, GOOGLE_SA_PRIVATE_KEY.
+  // Text variables are set in the dashboard and kept by `deploy --keep-vars`:
+  // QA_TEMPLATES (JSON list of {"label", "templateId"}).
+  "vars": {},
+  "env": {
+    // `wrangler deploy --env staging` deploys a separate Worker for testing, so a
+    // branch never replaces the live bot. It has no KV, so duplicate-click
+    // protection is off there.
+    "staging": { "name": "slack-qa-bot-staging", "vars": {} }
+  }
+}
