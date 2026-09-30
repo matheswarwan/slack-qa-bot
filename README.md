@@ -1,110 +1,120 @@
 # slack-qa-bot
 
-A Slack bot that hands out QA tasks. Someone runs `/qa` in a channel, fills in a form, and the bot copies a Google Sheets QA checklist for that type of task, shares it with the assignee and the requestor, and posts it to the channel. The assignee can accept or reject the task, and a rejected task can be reassigned.
+A Slack bot that hands out QA tasks for Salesforce Marketing Cloud work. Someone runs `/qa`, fills in a form, and the bot posts the task for the assignee to accept. On accept, it copies the Google Sheets QA checklist for that type of task and shares it with them.
 
-It is for a team that tracks QA work in checklist spreadsheets and wants the handoff to happen in Slack.
+It can also get **Claude to do a first-pass review**. If the requester attaches the email (a preview URL, an HTML file or pasted HTML) or a journey/automation export, Claude reviews it against the QA type's checklist. The findings go in the task's Slack thread and in a "Claude review" tab of the QA sheet. The assignee still does the QA and makes the final call.
 
-## Features
-
-- `/qa` slash command opens a "QA Submission" modal with:
-  - Assignee (members of the current channel)
-  - Project name
-  - QA type (one option per entry in `GOOGLE_TEMPLATE_IDS`)
-  - Deadline date and time
-  - Notes (optional)
-- On submit, the bot:
-  - copies the Google Sheet template for the chosen QA type into a Drive folder, named `<date> <time> - <project> - <QA type> QA`;
-  - gives the assignee and requestor edit access to the copy;
-  - joins the channel if needed and posts a message that mentions the assignee and links the sheet;
-  - sends the assignee an ephemeral message with **Accept** and **Reject** buttons.
-- **Accept** posts that the assignee accepted the task.
-- **Reject** posts that the task was rejected and sends the requestor an ephemeral **Re-Assign** button.
-- **Re-Assign** opens a modal pre-filled with the previous assignee, deadline and notes. Submitting it posts an updated message and sends the new assignee Accept and Reject buttons.
-- Drive copies retry with exponential backoff when Google returns `userRateLimitExceeded`.
+It runs as a Cloudflare Worker.
 
 ## How it works
 
-- Built on `@slack/bolt` with an `ExpressReceiver`, so Slack sends commands, interactions and events to `POST /slack/events`.
-- Google Drive access uses a service account (`googleapis`, Drive v3, full `drive` scope). Copies and permissions use `supportsAllDrives`, so shared drives work.
-- Everything is in `index.js`. There is no database. Task details are held in memory between steps.
+1. `/qa` opens a "New QA Task" form with these fields:
+   - assignee (members of the channel);
+   - project name;
+   - QA type (one per checklist template);
+   - deadline;
+   - notes.
+
+   When Claude is configured, there are also optional review fields: a preview or CloudPage URL, up to 3 files (`.html`, `.md`, `.txt`), or up to 3,000 characters of pasted text.
+2. **On submit,** the bot posts the task in the channel with **Accept** and **Reject** buttons for the assignee. If review material was attached, a background review starts in that message's thread.
+3. **Accept:**
+   - The bot copies the QA type's Google Sheet template into the folder above the template's folder, named `<deadline> - <project> - <QA type> QA`.
+   - It shares the copy with the assignee and adds the link to the message.
+   - Duplicate clicks are ignored, using KV (`TASK_STATE`).
+4. **Reject** marks the task as rejected. Only the assignee can accept or reject.
+
+### The Claude review
+
+Each task with review material gets its own `ReviewRunner` Durable Object. A review can take a few minutes, longer than Slack waits for a reply, so it runs in the object's alarm. In order:
+
+1. **Read the checklist:** the first tab of the QA type's template sheet.
+2. **Collect the material:**
+   - It fetches the URL (https only).
+   - It downloads the uploaded files from Slack.
+   - Anything too large or unreadable is skipped, and the thread says so. Nothing is cut short silently.
+3. **Ask Claude:** Claude (`claude-opus-5` by default) returns a structured result. That's one line per checklist item (pass, fail, warning or not checked, with the evidence and where it is), plus problems the checklist doesn't cover: broken links, missing alt text, AMPscript mistakes, leftover test copy, journey logic.
+4. **Post the findings** in the task thread, failures first.
+5. **Write the "Claude review" tab** into the QA sheet, once the sheet exists. The review may finish before or after the assignee accepts; either order works.
+
+The review material is passed to Claude as data, not instructions. Everything Claude writes is escaped before it's posted, so it can't ping `@channel` or disguise links. If Claude declines a request, the API retries it on its recommended fallback model (`fallbacks: "default"`). If the review fails, the thread says so and the task carries on as normal.
 
 ## Setup
 
-Prerequisites:
+### Slack app
 
-- Node.js 18 (`engines.node` is `18.x`).
-- A Slack app with:
-  - a slash command `/qa` pointing at `https://<your-host>/slack/events`;
-  - Interactivity enabled with the same request URL;
-  - bot scopes for what the code calls: `commands`, `chat:write`, `channels:join`, `channels:read` (and `groups:read` for private channels) for `conversations.members`, `users:read`, `users:read.email` and `users.profile:read`.
-- A Google Cloud service account with the Drive API enabled. It needs read access to the template sheets and write access to the destination folder.
-- One Google Sheet template per QA type.
+- **Slash command:** `/qa`, with the Worker URL as the request URL.
+- **Interactivity:** on, with the same URL.
+- **Bot scopes:**
+  - `commands`, `chat:write`;
+  - `channels:read` (and `groups:read` for private channels) for the assignee list;
+  - `users:read` and `users:read.email` to share the sheet;
+  - `files:read` to read files uploaded for review.
 
-Install and run:
+### Google
+
+A service account with the Drive and Sheets APIs enabled. It needs to read the template sheets and write to the folder the copies go into. Use one template sheet per QA type; the first tab is the checklist Claude reviews against.
+
+### Worker configuration
+
+| Name | Type | What it is |
+|---|---|---|
+| `SLACK_BOT_TOKEN` | Secret | Bot user OAuth token |
+| `SLACK_SIGNING_SECRET` | Secret | Used to verify requests come from Slack |
+| `GOOGLE_SA_CLIENT_EMAIL` | Secret | Service account email |
+| `GOOGLE_SA_PRIVATE_KEY` | Secret | Service account private key (PEM) |
+| `QA_TEMPLATES` | Text | The QA types: `[{"label": "Email Send", "templateId": "<sheet id>"}, ...]` |
+| `ANTHROPIC_API_KEY` | Secret | Turns on the Claude review. Without it the review fields are hidden |
+| `CLAUDE_MODEL` | Text, optional | Model for reviews (default `claude-opus-5`) |
+
+`wrangler.jsonc` binds the `TASK_STATE` KV namespace and the `REVIEWS` Durable Object.
 
 ```sh
 npm install
-npm start        # node index.js
+npx wrangler secret put ANTHROPIC_API_KEY   # and the other secrets
+npm run deploy:staging   # a separate slack-qa-bot-staging Worker, for testing
+npm run deploy           # the live bot
 ```
 
-`index.js` also requires `express` and `body-parser`. They are not listed in `package.json` and currently come in through `@slack/bolt`.
+`deploy` keeps variables set in the Cloudflare dashboard. Test changes on staging first: point a test Slack app at the staging Worker's URL.
 
-### Environment variables
+## Tests
 
-| Name | Purpose |
-| --- | --- |
-| `SLACK_BOT_TOKEN` | Slack bot user OAuth token |
-| `SLACK_SIGNING_SECRET` | Slack signing secret, used to verify requests |
-| `GOOGLE_APPLICATION_CREDENTIALS_JSON` | The service account key JSON, as a single string |
-| `GOOGLE_TEMPLATE_IDS` | JSON object mapping a QA type key to a Google Sheet file ID. Keys become the dropdown options, with underscores turned into spaces and words capitalized |
-| `COPY_INTO_FOLDER_ID` | Google Drive folder ID where the copies go |
-| `PORT` | HTTP port (default 3000) |
-| `CONFIG` | Only printed to the log at startup, otherwise unused (an older version used it as a key file path) |
-
-Example shape for `GOOGLE_TEMPLATE_IDS` (placeholder IDs):
-
-```json
-{ "email_build": "<sheet-file-id>", "journey_setup": "<sheet-file-id>" }
+```sh
+npm test
 ```
 
-The code reads `process.env` directly and does not call `dotenv`, so set the variables in your shell or hosting platform. `.gitignore` excludes a file named `env.config`.
+The tests cover:
+- the Claude request (model, structured output, material wrapped as data);
+- handling refusals and cut-off responses;
+- the Slack report (escaping, ordering, Slack's size limits);
+- collecting material (https only, skipped files reported, total size cap);
+- reading the checklist and writing the review tab;
+- the review runner in both orders (review before or after the sheet), and its failure cases;
+- the Worker wiring: review fields shown only when configured, and a submission queueing a review in the task's thread.
 
-## Usage
-
-1. Invite the bot to the channel. For public channels it also tries to join by itself when a form is submitted.
-2. Run `/qa` in the channel and fill in the form.
-3. The assignee clicks **Accept** or **Reject** in the ephemeral message.
-4. On reject, the requestor clicks **Re-Assign** and picks a new assignee or deadline.
-
-## Deployment
-
-The previous README recorded a Heroku deployment:
-
-- App: `https://slack-qa-bot-da8758f719e8.herokuapp.com/`
-- Slack request URL: `https://slack-qa-bot-da8758f719e8.herokuapp.com/slack/events`
-
-There is no Procfile. Heroku runs `npm start` by default.
+Slack, Google and Claude are stubbed. Nothing calls the real APIs.
 
 ## Project structure
 
 ```
-index.js       The whole bot: Slack handlers, Drive helpers, server start
-package.json   Dependencies and start script
+src/worker.js          Slack handlers: /qa, the form, accept/reject, Google Sheet copy
+src/google-auth.js     Service-account token for Drive and Sheets
+src/review/runner.js   ReviewRunner Durable Object: runs one task's review
+src/review/claude.js   The Claude request, output schema and response handling
+src/review/inputs.js   Fetches the URL and Slack files to review
+src/review/sheets.js   Reads the checklist; writes the "Claude review" tab
+src/review/report.js   Formats the Slack thread reply
+tests/                 node:test tests with stubbed APIs
 ```
 
-## Status and known limitations
+## Limitations
 
-- Task state (assignee, project, deadline, notes, sheet link) is kept in module-level variables. Two people using `/qa` at the same time will overwrite each other's data, and the Re-Assign modal may pre-fill values from a different task. Restarts lose it.
-- The reassigned-task message does not include the sheet link, and the sheet is not shared with the new assignee.
-- If the Drive copy fails, the error is logged but the handler then fails when building the sheet link, so nothing is posted to Slack and the user gets no feedback.
-- The accept message is posted as the clicking user's own acceptance. The variable is named `requestorId` but it holds the assignee.
-- Opening the modal calls `users.info` once per channel member, which is slow and can hit Slack rate limits in large channels. Slack also caps static select menus at 100 options.
-- The bot logs user emails, the full request object on `POST /`, and the value of `CONFIG` at startup. Check that logs do not leak anything sensitive.
-- No tests.
+- **Tested with stubs only:** the review hasn't yet run against a real Slack workspace, Google account or the Claude API. Try it on staging first.
+- **No rendering check:** Claude reads the HTML or the preview page's HTML; it doesn't see how the email renders in Outlook or Gmail. Checklist items like that come back as "not checked".
+- **Size limits:** material over about 400,000 characters per item (600,000 in total) is skipped, and the thread says so.
+- **Pasted text limit:** Slack caps pasted text at 3,000 characters, so full emails need a file or a URL.
+- **Private previews:** the URL must be reachable from the internet. Pages behind a login can't be fetched.
 
-## Ideas
+## History
 
-- Store each task by message or sheet ID (for example in a small database) instead of globals.
-- Use Slack's `users_select` element instead of building the member list by hand.
-- Share the sheet with the new assignee on reassign and include the link.
-- Report Drive errors back to the requestor.
+Before July 2026 this was a Node app using `@slack/bolt` (see `index.js` in git history). It kept task state in memory and ran on Heroku.

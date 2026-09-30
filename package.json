@@ -6,11 +6,15 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --keep-vars",
-    "deploy:staging": "wrangler deploy --env staging --keep-vars"
+    "deploy:staging": "wrangler deploy --env staging --keep-vars",
+    "test": "node --test tests/*.test.js"
   },
   "devDependencies": {
     "wrangler": "^4.144.0"
   },
   "author": "Mathes K",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0"
+  }
 }

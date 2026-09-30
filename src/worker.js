@@ -1,61 +1,17 @@
-var GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token";
-var GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive"
-].join(" ");
-function base64url(bytes) {
-  let str = "";
-  const arr = new Uint8Array(bytes);
-  for (let i = 0; i < arr.length; i++) str += String.fromCharCode(arr[i]);
-  return btoa(str).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+import { getGoogleAccessToken } from "./google-auth.js";
+
+export { ReviewRunner } from "./review/runner.js";
+
+// Claude's first-pass review runs when there's an API key and the REVIEWS
+// Durable Object binding. Without them the bot behaves exactly as before.
+function reviewEnabled(env) {
+  return Boolean(env.ANTHROPIC_API_KEY && env.REVIEWS);
 }
-function strToBase64url(str) {
-  return btoa(unescape(encodeURIComponent(str))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+
+function reviewRunner(env, taskId) {
+  return env.REVIEWS.get(env.REVIEWS.idFromName(taskId));
 }
-async function importPrivateKey(pem) {
-  const pemBody = pem.replace("-----BEGIN PRIVATE KEY-----", "").replace("-----END PRIVATE KEY-----", "").replace(/\\n/g, "").replace(/\s/g, "");
-  const der = Uint8Array.from(atob(pemBody), (c) => c.charCodeAt(0));
-  return crypto.subtle.importKey(
-    "pkcs8",
-    der.buffer,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-}
-async function getGoogleAccessToken(env) {
-  const now = Math.floor(Date.now() / 1e3);
-  const header = { alg: "RS256", typ: "JWT" };
-  const claims = {
-    iss: env.GOOGLE_SA_CLIENT_EMAIL,
-    scope: GOOGLE_SCOPES,
-    aud: GOOGLE_TOKEN_URI,
-    iat: now,
-    exp: now + 3600
-  };
-  const unsigned = `${strToBase64url(JSON.stringify(header))}.${strToBase64url(JSON.stringify(claims))}`;
-  const key = await importPrivateKey(env.GOOGLE_SA_PRIVATE_KEY);
-  const signature = await crypto.subtle.sign(
-    { name: "RSASSA-PKCS1-v1_5" },
-    key,
-    new TextEncoder().encode(unsigned)
-  );
-  const jwt = `${unsigned}.${base64url(signature)}`;
-  const res = await fetch(GOOGLE_TOKEN_URI, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-      assertion: jwt
-    })
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    console.error("Error minting Google access token:", data);
-    throw new Error(data.error_description || data.error || "Token exchange failed");
-  }
-  return data.access_token;
-}
+
 async function verifySlackRequest(body, request, env) {
   const timestamp = request.headers.get("x-slack-request-timestamp");
   const slackSignature = request.headers.get("x-slack-signature");
@@ -187,6 +143,7 @@ async function sendSlackMessage(env, channelId, message, blocks) {
     throw new Error(slackResponse.error || "Failed to send message");
   }
   console.log(`Message sent to channel: ${channelId}`);
+  return slackResponse;
 }
 function encodeTaskPayload(task) {
   return btoa(unescape(encodeURIComponent(JSON.stringify(task))));
@@ -412,8 +369,49 @@ function buildQaModalView(assigneeOptions, channelId, env) {
         optional: true,
         label: { type: "plain_text", text: "Notes" },
         element: { type: "plain_text_input", action_id: "notes_input", multiline: true }
-      }
+      },
+      ...(reviewEnabled(env) ? buildReviewInputBlocks() : [])
     ]
+  };
+}
+function buildReviewInputBlocks() {
+  return [
+    { type: "divider" },
+    {
+      type: "context",
+      elements: [{
+        type: "mrkdwn",
+        text: "*Optional: something for Claude to review.* Add any of these and Claude posts a first-pass review against this QA type's checklist in the task thread."
+      }]
+    },
+    {
+      type: "input",
+      block_id: "review_url_block",
+      optional: true,
+      label: { type: "plain_text", text: "Preview or CloudPage URL" },
+      element: { type: "url_text_input", action_id: "review_url_input" }
+    },
+    {
+      type: "input",
+      block_id: "review_files_block",
+      optional: true,
+      label: { type: "plain_text", text: "Files (email HTML, or a journey/automation export as .md)" },
+      element: { type: "file_input", action_id: "review_files_input", filetypes: ["html", "htm", "md", "txt"], max_files: 3 }
+    },
+    {
+      type: "input",
+      block_id: "review_text_block",
+      optional: true,
+      label: { type: "plain_text", text: "Or paste HTML or text (up to 3,000 characters)" },
+      element: { type: "plain_text_input", action_id: "review_text_input", multiline: true, max_length: 3000 }
+    }
+  ];
+}
+function readReviewInputs(values) {
+  return {
+    url: values.review_url_block?.review_url_input?.value || "",
+    fileIds: (values.review_files_block?.review_files_input?.files || []).map((f) => f.id).filter(Boolean),
+    text: values.review_text_block?.review_text_input?.value || ""
   };
 }
 async function openQaModal(env, triggerId, channelId) {
@@ -461,13 +459,34 @@ async function handleQaSubmission(env, payload) {
     c: channelId
   };
   const blocks = buildTaskAcceptRejectBlocks(taskPayload);
-  await sendSlackMessage(
+  const posted = await sendSlackMessage(
     env,
     channelId,
     `<@${assignee}> You've been assigned a QA task: ${qaTask} for ${projectName}. Please accept or reject.`,
     blocks
   );
   console.log(`Accept/Reject prompt posted in channel ${channelId} for ${projectName}`);
+  const inputs = readReviewInputs(values);
+  if (reviewEnabled(env) && (inputs.url || inputs.fileIds.length || inputs.text.trim())) {
+    // The review inputs stay out of the button payload (Slack caps it at 2,000
+    // characters); the review job keeps them.
+    await reviewRunner(env, taskPayload.id).fetch("https://review/start", {
+      method: "POST",
+      body: JSON.stringify({
+        job: {
+          taskId: taskPayload.id,
+          channelId,
+          threadTs: posted.ts,
+          qaType: qaTask,
+          templateId,
+          project: projectName,
+          notes,
+          inputs
+        }
+      })
+    });
+    console.log(`Claude review queued for task ${taskPayload.id}`);
+  }
 }
 async function handleTaskAccept(env, payload, task, assigneeId, originalBlocks) {
   if (assigneeId !== task.a) {
@@ -525,6 +544,13 @@ async function handleBlockAction(env, payload, ctx) {
         }
         const spreadsheetId = await handleTaskAccept(env, payload, task, assigneeId, originalBlocks);
         await completeTask(env, task.id, spreadsheetId);
+        if (reviewEnabled(env) && task.id) {
+          // Harmless for tasks without a review: the runner has nothing to write.
+          await reviewRunner(env, task.id).fetch("https://review/sheet", {
+            method: "POST",
+            body: JSON.stringify({ spreadsheetId })
+          }).catch((err) => console.error("Couldn't pass the sheet to the review:", err));
+        }
       } catch (err) {
         console.error("Error handling task response:", err);
         await failTask(env, task.id);

@@ -5,15 +5,24 @@
   "compatibility_date": "2026-07-03",
   "workers_dev": true,
   "kv_namespaces": [{ "binding": "TASK_STATE", "id": "5e6833ddf0d6480083e64c4a3699434b" }],
+  // One ReviewRunner per QA task runs Claude's first-pass review in the background.
+  "durable_objects": { "bindings": [{ "name": "REVIEWS", "class_name": "ReviewRunner" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReviewRunner"] }],
   // Secrets (wrangler secret put): SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET,
-  // GOOGLE_SA_CLIENT_EMAIL, GOOGLE_SA_PRIVATE_KEY.
+  // GOOGLE_SA_CLIENT_EMAIL, GOOGLE_SA_PRIVATE_KEY, and ANTHROPIC_API_KEY for
+  // Claude's review (without it the review is switched off).
   // Text variables are set in the dashboard and kept by `deploy --keep-vars`:
-  // QA_TEMPLATES (JSON list of {"label", "templateId"}).
+  // QA_TEMPLATES (JSON list of {"label", "templateId"}), CLAUDE_MODEL (optional,
+  // default claude-opus-5).
   "vars": {},
   "env": {
     // `wrangler deploy --env staging` deploys a separate Worker for testing, so a
     // branch never replaces the live bot. It has no KV, so duplicate-click
     // protection is off there.
-    "staging": { "name": "slack-qa-bot-staging", "vars": {} }
+    "staging": {
+      "name": "slack-qa-bot-staging",
+      "vars": {},
+      "durable_objects": { "bindings": [{ "name": "REVIEWS", "class_name": "ReviewRunner" }] }
+    }
   }
 }
