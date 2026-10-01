@@ -14,16 +14,22 @@ async function sheetsJson(accessToken, url, init = {}) {
   return data;
 }
 
-// The first tab of the template, as one line per non-empty row.
+// Every tab of the template, one line per non-empty row, under its tab name.
+// (The Email Send template starts with an "Overview & Status" tab, so the
+// first tab alone isn't the checklist.)
 export async function readChecklist(accessToken, templateId) {
   const meta = await sheetsJson(accessToken, `${SHEETS}/${templateId}?fields=sheets.properties.title`);
-  const title = meta.sheets?.[0]?.properties?.title;
-  if (!title) return "";
-  const data = await sheetsJson(accessToken, `${SHEETS}/${templateId}/values/${encodeURIComponent(`'${title.replace(/'/g, "''")}'`)}`);
-  const lines = (data.values || [])
-    .map((row) => row.map((cell) => String(cell).trim()).filter(Boolean).join(" | "))
-    .filter(Boolean);
-  const text = lines.join("\n");
+  const titles = (meta.sheets || []).map((s) => s.properties.title);
+  if (!titles.length) return "";
+  const ranges = titles.map((t) => `ranges=${encodeURIComponent(`'${t.replace(/'/g, "''")}'`)}`).join("&");
+  const data = await sheetsJson(accessToken, `${SHEETS}/${templateId}/values:batchGet?${ranges}`);
+  const parts = titles.map((title, i) => {
+    const lines = (data.valueRanges?.[i]?.values || [])
+      .map((row) => row.map((cell) => String(cell).trim()).filter(Boolean).join(" | "))
+      .filter(Boolean);
+    return lines.length ? `## ${title}\n${lines.join("\n")}` : "";
+  }).filter(Boolean);
+  const text = parts.join("\n\n");
   return text.length > MAX_CHECKLIST_CHARS ? text.slice(0, MAX_CHECKLIST_CHARS) + "\n(checklist continues; truncated)" : text;
 }
 

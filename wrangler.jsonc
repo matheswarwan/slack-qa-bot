@@ -9,11 +9,12 @@
   "durable_objects": { "bindings": [{ "name": "REVIEWS", "class_name": "ReviewRunner" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ReviewRunner"] }],
   // Secrets (wrangler secret put): SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET,
-  // GOOGLE_SA_CLIENT_EMAIL, GOOGLE_SA_PRIVATE_KEY, and ANTHROPIC_API_KEY for
-  // Claude's review (without it the review is switched off).
+  // GOOGLE_SA_CLIENT_EMAIL, GOOGLE_SA_PRIVATE_KEY, JEV_API_KEY (Jeff for email
+  // tasks) and ANTHROPIC_API_KEY (Claude for journeys and automations). Each
+  // review is off without its key.
   // Text variables are set in the dashboard and kept by `deploy --keep-vars`:
-  // QA_TEMPLATES (JSON list of {"label", "templateId"}), CLAUDE_MODEL (optional,
-  // default claude-opus-5).
+  // QA_TEMPLATES (JSON list of {"label", "templateId", optional "reviewer"}),
+  // JEV_MODEL, JEV_BASE_URL and CLAUDE_MODEL (all optional).
   "vars": {},
   "env": {
     // `wrangler deploy --env staging` deploys a separate Worker for testing, so a

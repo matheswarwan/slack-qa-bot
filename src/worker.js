@@ -2,10 +2,21 @@ import { getGoogleAccessToken } from "./google-auth.js";
 
 export { ReviewRunner } from "./review/runner.js";
 
-// Claude's first-pass review runs when there's an API key and the REVIEWS
-// Durable Object binding. Without them the bot behaves exactly as before.
+// Automated first-pass reviews need the REVIEWS Durable Object binding plus
+// a key: JEV_API_KEY for emails (Jeff, on Jev), ANTHROPIC_API_KEY for
+// journeys and automations (Claude). Without them the bot behaves exactly as
+// before.
 function reviewEnabled(env) {
-  return Boolean(env.ANTHROPIC_API_KEY && env.REVIEWS);
+  return Boolean(env.REVIEWS && (env.ANTHROPIC_API_KEY || env.JEV_API_KEY));
+}
+
+// Which reviewer a QA type uses: the template's "reviewer" setting ("jeff" or
+// "claude"), otherwise Jeff for email QA types and Claude for the rest.
+function reviewerFor(env, templateId, label) {
+  const t = getQaTemplates(env).find((x) => x.templateId === templateId);
+  const kind = t?.reviewer || (/email/i.test(label || "") ? "jeff" : "claude");
+  const hasKey = kind === "jeff" ? env.JEV_API_KEY : env.ANTHROPIC_API_KEY;
+  return hasKey ? kind : null;
 }
 
 function reviewRunner(env, taskId) {
@@ -381,7 +392,7 @@ function buildReviewInputBlocks() {
       type: "context",
       elements: [{
         type: "mrkdwn",
-        text: "*Optional: something for Claude to review.* Add any of these and Claude posts a first-pass review against this QA type's checklist in the task thread."
+        text: "*Optional: the work to check.* For email tasks, Jev checks the email against every question in the QA sheet once it's created. For journeys and automations, Claude reviews it against the checklist. Results go in the task thread."
       }]
     },
     {
@@ -467,13 +478,15 @@ async function handleQaSubmission(env, payload) {
   );
   console.log(`Accept/Reject prompt posted in channel ${channelId} for ${projectName}`);
   const inputs = readReviewInputs(values);
-  if (reviewEnabled(env) && (inputs.url || inputs.fileIds.length || inputs.text.trim())) {
+  const kind = reviewEnabled(env) ? reviewerFor(env, templateId, qaTask) : null;
+  if (kind && (inputs.url || inputs.fileIds.length || inputs.text.trim())) {
     // The review inputs stay out of the button payload (Slack caps it at 2,000
     // characters); the review job keeps them.
     await reviewRunner(env, taskPayload.id).fetch("https://review/start", {
       method: "POST",
       body: JSON.stringify({
         job: {
+          kind,
           taskId: taskPayload.id,
           channelId,
           threadTs: posted.ts,
@@ -485,7 +498,7 @@ async function handleQaSubmission(env, payload) {
         }
       })
     });
-    console.log(`Claude review queued for task ${taskPayload.id}`);
+    console.log(`${kind} review queued for task ${taskPayload.id}`);
   }
 }
 async function handleTaskAccept(env, payload, task, assigneeId, originalBlocks) {

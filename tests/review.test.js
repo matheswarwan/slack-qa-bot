@@ -112,15 +112,15 @@ test("collectMaterials: pasted text, https URL, Slack files; skips with notes, n
 
 // ---------- Google Sheets ----------
 
-test("readChecklist reads the first tab; writeReviewTab reuses an existing tab", async () => {
+test("readChecklist reads every tab; writeReviewTab reuses an existing tab", async () => {
   const calls = stubFetch([
-    [/\/T1\?fields=/, () => Response.json({ sheets: [{ properties: { title: "Email QA" } }] })],
-    [/\/T1\/values\//, () => Response.json({ values: [["Check", "Done?"], [], ["Links work", ""], ["  Alt text  "]] })],
+    [/\/T1\?fields=/, () => Response.json({ sheets: [{ properties: { title: "Overview" } }, { properties: { title: "Journey QA" } }] })],
+    [/\/T1\/values:batchGet/, () => Response.json({ valueRanges: [{ values: [["Campaign", "[Enter]"]] }, { values: [["Check", "Done?"], [], ["Entry source set", ""], ["  Exit criteria  "]] }] })],
     [/:batchUpdate/, () => Response.json({ error: { message: 'A sheet with the name "Claude review" already exists.' } }, { status: 400 })],
     [/\/S1\/values\//, (u, init) => Response.json({ ok: true, body: init.body })],
   ]);
-  assert.equal(await readChecklist("tok", "T1"), "Check | Done?\nLinks work\nAlt text");
-  assert.ok(calls[1].url.includes(encodeURIComponent("'Email QA'")));
+  assert.equal(await readChecklist("tok", "T1"), "## Overview\nCampaign | [Enter]\n\n## Journey QA\nCheck | Done?\nEntry source set\nExit criteria");
+  assert.ok(calls[1].url.includes(`ranges=${encodeURIComponent("'Journey QA'")}`));
   const rows = reviewRows(REVIEW, { model: "m", reviewedAt: "2026-09-30T00:00:00Z", sources: ["a.html"] });
   await writeReviewTab("tok", "S1", rows);
   const put = calls.at(-1);
@@ -224,7 +224,7 @@ function workerEnv(extra = {}) {
   };
 }
 
-test("worker: modal shows review fields only when Claude is configured", async () => {
+test("worker: modal shows review fields only when a reviewer is configured", async () => {
   const views = [];
   stubFetch([
     [/conversations\.members/, () => Response.json({ ok: false, error: "not_in_channel" })],
@@ -232,16 +232,16 @@ test("worker: modal shows review fields only when Claude is configured", async (
   ]);
   const cmd = new URLSearchParams({ command: "/qa", user_id: "U1", trigger_id: "tr", channel_id: "C1" }).toString();
   await worker.fetch(signed(cmd), workerEnv().env, { waitUntil() {} });
-  await worker.fetch(signed(cmd), workerEnv({ ANTHROPIC_API_KEY: "sk" }).env, { waitUntil() {} });
+  await worker.fetch(signed(cmd), workerEnv({ JEV_API_KEY: "jev" }).env, { waitUntil() {} });
   const ids = (v) => v.blocks.map((b) => b.block_id).filter(Boolean);
   assert.ok(!ids(views[0]).includes("review_files_block"));
   assert.deepEqual(ids(views[1]).slice(-3), ["review_url_block", "review_files_block", "review_text_block"]);
   assert.deepEqual(views[1].blocks.find((b) => b.block_id === "qa_task_block").element.options, [{ text: { type: "plain_text", text: "Email Send" }, value: "T1" }]);
 });
 
-test("worker: a submission with material queues a review in the task's thread", async () => {
+test("worker: email tasks queue Jeff, other tasks queue Claude, each only with its key", async () => {
   stubFetch([[/chat\.postMessage/, () => Response.json({ ok: true, ts: "1700000000.0001" })]]);
-  const { env, started } = workerEnv({ ANTHROPIC_API_KEY: "sk" });
+  const { env, started } = workerEnv({ ANTHROPIC_API_KEY: "sk", JEV_API_KEY: "jev" });
   const values = {
     assignee_block: { assignee_input: { selected_user: "U2" } },
     project_name_block: { project_name_input: { value: "Spring sale" } },
@@ -263,6 +263,19 @@ test("worker: a submission with material queues a review in the task's thread", 
   assert.equal(job.threadTs, "1700000000.0001");
   assert.deepEqual(job.inputs, { url: "https://preview.example/e", fileIds: ["F1"], text: "" });
   assert.equal(job.templateId, "T1");
+  assert.equal(job.kind, "jeff", "an Email Send task goes to Jeff");
+
+  // A journey task goes to Claude; without the Claude key it isn't queued.
+  started.length = 0;
+  values.qa_task_block.qa_task_select.selected_option = { text: { text: "Journey Builder" }, value: "T2" };
+  await worker.fetch(signed(new URLSearchParams({ payload: JSON.stringify(payload) }).toString()), env, { waitUntil: (p) => pending.push(p) });
+  await Promise.all(pending);
+  assert.equal(started[0].body.job.kind, "claude");
+  started.length = 0;
+  await worker.fetch(signed(new URLSearchParams({ payload: JSON.stringify(payload) }).toString()), { ...env, ANTHROPIC_API_KEY: "" }, { waitUntil: (p) => pending.push(p) });
+  await Promise.all(pending);
+  assert.equal(started.length, 0);
+  values.qa_task_block.qa_task_select.selected_option = { text: { text: "Email Send" }, value: "T1" };
 
   // Without material, or without Claude configured, nothing is queued.
   started.length = 0;
