@@ -1,0 +1,32 @@
+# Slack app manifest for testing the staging Worker. Create the app at
+# https://api.slack.com/apps -> Create New App -> From a manifest, pick the
+# workspace, paste this file. It uses /qa-staging so it can sit next to the real /qa.
+display_information:
+  name: QA Bot (staging)
+  description: Test copy of the QA bot, pointed at the staging Worker.
+features:
+  bot_user:
+    display_name: qa-bot-staging
+    always_online: false
+  slash_commands:
+    - command: /qa-staging
+      url: https://slack-qa-bot-staging.mathes-btech.workers.dev/
+      description: Create a QA task (staging)
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+      - channels:read
+      - groups:read
+      - users:read
+      - users:read.email
+      - files:read
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://slack-qa-bot-staging.mathes-btech.workers.dev/
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

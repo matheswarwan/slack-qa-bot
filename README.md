@@ -110,6 +110,19 @@ npm run deploy           # the live bot
 
 `deploy` keeps variables set in the Cloudflare dashboard. Test changes on staging first: point a test Slack app at the staging Worker's URL.
 
+#### Staging
+
+The staging Worker is https://slack-qa-bot-staging.mathes-btech.workers.dev. To test it:
+
+1. Create a test Slack app from `slack-app-manifest.staging.yml` (api.slack.com/apps, Create New App, From a manifest). It uses `/qa-staging`, which the Worker treats like `/qa`, so it can share a workspace with the real bot. Install it and invite it to a test channel.
+2. Give the staging Worker its own secrets (`--env staging`): the test app's `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`, the same `GOOGLE_SA_CLIENT_EMAIL` and `GOOGLE_SA_PRIVATE_KEY` as live, and `JEV_API_KEY` and/or `ANTHROPIC_API_KEY`:
+   ```bash
+   npx wrangler secret put SLACK_BOT_TOKEN --env staging
+   ```
+3. `QA_TEMPLATES` is set on staging. The live Worker still runs the older code with the template IDs built in, so set `QA_TEMPLATES` on live before deploying this version there.
+
+Staging has no KV namespace, so clicking Accept twice can start two reviews there.
+
 ## Tests
 
 ```sh

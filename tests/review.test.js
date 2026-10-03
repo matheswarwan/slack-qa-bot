@@ -239,6 +239,19 @@ test("worker: modal shows review fields only when a reviewer is configured", asy
   assert.deepEqual(views[1].blocks.find((b) => b.block_id === "qa_task_block").element.options, [{ text: { type: "plain_text", text: "Email Send" }, value: "T1" }]);
 });
 
+test("worker: /qa-staging opens the same modal, other commands don't", async () => {
+  const views = [];
+  stubFetch([
+    [/conversations\.members/, () => Response.json({ ok: false, error: "not_in_channel" })],
+    [/views\.open/, (u, init) => { views.push(JSON.parse(init.body).view); return Response.json({ ok: true }); }],
+  ]);
+  const cmd = (command) => new URLSearchParams({ command, user_id: "U1", trigger_id: "tr", channel_id: "C1" }).toString();
+  await worker.fetch(signed(cmd("/qa-staging")), workerEnv().env, { waitUntil() {} });
+  const other = await worker.fetch(signed(cmd("/qa-other")), workerEnv().env, { waitUntil() {} });
+  assert.equal(views.length, 1);
+  assert.equal(await other.text(), "No action taken");
+});
+
 test("worker: email tasks queue Jeff, other tasks queue Claude, each only with its key", async () => {
   stubFetch([[/chat\.postMessage/, () => Response.json({ ok: true, ts: "1700000000.0001" })]]);
   const { env, started } = workerEnv({ ANTHROPIC_API_KEY: "sk", JEV_API_KEY: "jev" });

@@ -622,8 +622,10 @@ async function handleRequest(request, env, ctx) {
     const triggerId = formData.get("trigger_id");
     const channelId = formData.get("channel_id");
     console.log(`Command: ${command}, User ID: ${userId}, Channel: ${channelId}`);
-    if (command === "/qa") {
-      console.log("Command = /qa. Opening modal.");
+    // /qa-staging lets a separate test Slack app (pointed at the staging Worker)
+    // live in the same workspace as the real /qa.
+    if (command === "/qa" || command === "/qa-staging") {
+      console.log(`Command = ${command}. Opening modal.`);
       await openQaModal(env, triggerId, channelId);
       return new Response("", { status: 200 });
     }
